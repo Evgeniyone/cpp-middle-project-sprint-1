@@ -78,7 +78,10 @@ int main(int argc, char *argv[]) {
         //
 
         CryptoGuard::ProgramOptions options;
-
+        if(!options.Parse(argc, argv)){
+            throw std::runtime_error("Can`t parse options");
+        }
+        
         CryptoGuard::CryptoGuardCtx cryptoCtx;
 
         using COMMAND_TYPE = CryptoGuard::ProgramOptions::COMMAND_TYPE;
