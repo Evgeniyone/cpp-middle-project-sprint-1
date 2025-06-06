@@ -4,56 +4,48 @@
 #include <iostream>
 #include <fstream>
 #include <stdexcept>
+#include <print>
+
+using namespace CryptoGuard;
+
+std::fstream GetFilestream(std::string_view filename, std::ios::openmode mode) {
+    std::fstream file(std::string(filename), mode);
+    if (!file.is_open()) {
+        throw std::runtime_error(std::format("Cannot open file: {}", filename));
+    }
+    return file;
+}
 
 int main(int argc, char* argv[]) {
     try {
-        CryptoGuard::ProgramOptions options;
+        ProgramOptions options;
         if (!options.Parse(argc, argv)) {
-            return 0;
+            return 0;  // help or usage printed
         }
 
-        const auto inPath  = options.GetInputFile();
-        std::ifstream inFile(inPath, std::ios::binary);
-        if (!inFile.is_open()) {
-            std::cerr << "Error: cannot open input file: " << inPath << "\n";
-            return 1;
-        }
+        auto inFile = GetFilestream(options.GetInputFile(), std::ios::in | std::ios::binary);
 
-        CryptoGuard::CryptoGuardCtx cryptoCtx;
+        CryptoGuardCtx cryptoCtx;
+        using CMD = ProgramOptions::COMMAND_TYPE;
 
-        using CMD = CryptoGuard::ProgramOptions::COMMAND_TYPE;
         switch (options.GetCommand()) {
             case CMD::ENCRYPT: {
-                const auto outPath = options.GetOutputFile();
-                std::ofstream outFile(outPath, std::ios::binary);
-                if (!outFile.is_open()) {
-                    std::cerr << "Error: cannot open output file: " << outPath << "\n";
-                    return 1;
-                }
-
-                const auto pwd = options.GetPassword();
-                cryptoCtx.EncryptFile(inFile, outFile, pwd);
-                std::cout << "File encrypted successfully: " << outPath << "\n";
+                auto outFile = GetFilestream(options.GetOutputFile(), std::ios::out | std::ios::binary);
+                cryptoCtx.EncryptFile(inFile, outFile, options.GetPassword());
+                std::println("File encrypted successfully: {}", options.GetOutputFile());
                 break;
             }
 
             case CMD::DECRYPT: {
-                const auto outPath = options.GetOutputFile();
-                std::ofstream outFile(outPath, std::ios::binary);
-                if (!outFile.is_open()) {
-                    std::cerr << "Error: cannot open output file: " << outPath << "\n";
-                    return 1;
-                }
-
-                const auto pwd = options.GetPassword();
-                cryptoCtx.DecryptFile(inFile, outFile, pwd);
-                std::cout << "File decrypted successfully: " << outPath << "\n";
+                auto outFile = GetFilestream(options.GetOutputFile(), std::ios::out | std::ios::binary);
+                cryptoCtx.DecryptFile(inFile, outFile, options.GetPassword());
+                std::println("File decrypted successfully: {}", options.GetOutputFile());
                 break;
             }
 
             case CMD::CHECKSUM: {
                 std::string sum = cryptoCtx.CalculateChecksum(inFile);
-                std::cout << "Checksum: " << sum << "\n";
+                std::println("Checksum: {}", sum);
                 break;
             }
 
@@ -62,7 +54,7 @@ int main(int argc, char* argv[]) {
         }
 
     } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << "\n";
+        std::print(std::cerr, "Error: {}\n", e.what());
         return 1;
     }
 

@@ -15,8 +15,8 @@ namespace CryptoGuard {
 
 static std::string GetOpenSSLError() {
     unsigned long err = ERR_get_error();
-    char buf[256] = {0};
-    ERR_error_string_n(err, buf, sizeof(buf));
+    std::string buf(256, '\0');
+    ERR_error_string_n(err, buf.data(), buf.size());
     return buf;
 }
 
@@ -38,12 +38,12 @@ class CryptoGuardCtx::Impl {
     };
 
     static AesCipherParams CreateCipherParamsFromPassword(std::string_view password) {
-        unsigned char salt[8] = {0};
+        std::array<unsigned char, 8> salt{};
         std::array<unsigned char, 48> out{};
 
         if (1 != PKCS5_PBKDF2_HMAC(
                 password.data(), int(password.size()),
-                salt, sizeof(salt),
+                salt.data(), salt.size(),
                 10000,
                 EVP_sha256(),
                 int(out.size()), out.data()))
@@ -52,117 +52,77 @@ class CryptoGuardCtx::Impl {
         }
 
         AesCipherParams p;
-        std::copy_n(out.data(), 32, p.key.begin());
-        std::copy_n(out.data() + 32, 16, p.iv.begin());
+        std::copy_n(out.data(), p.key.size(), p.key.begin());
+        std::copy_n(out.data() + p.key.size(), p.iv.size(), p.iv.begin());
         return p;
     }
 
-    void EncryptFile(std::istream& inStream,
-                     std::ostream& outStream,
-                     std::string_view password)
-    {
-        if (!inStream.good())  throw std::runtime_error("Bad input stream");
-        if (!outStream.good()) throw std::runtime_error("Bad output stream");
+    void ProcessFile(std::istream &inStream, std::ostream &outStream,
+                     std::string_view password, CipherMode mode) {
+      if (!inStream.good())
+        throw std::runtime_error("Bad input stream");
+      if (!outStream.good())
+        throw std::runtime_error("Bad output stream");
 
-        AesCipherParams params = CreateCipherParamsFromPassword(password);
+      AesCipherParams params = CreateCipherParamsFromPassword(password);
 
-        std::unique_ptr<EVP_CIPHER_CTX, decltype(&EVP_CIPHER_CTX_free)>
-            ctx{EVP_CIPHER_CTX_new(), EVP_CIPHER_CTX_free};
+      std::unique_ptr<EVP_CIPHER_CTX, decltype(&EVP_CIPHER_CTX_free)> ctx{
+          EVP_CIPHER_CTX_new(), EVP_CIPHER_CTX_free};
 
-            if (!ctx) throw std::runtime_error("EVP_CIPHER_CTX_new failed");
+      if (!ctx)
+        throw std::runtime_error("EVP_CIPHER_CTX_new failed");
 
-        if (1 != EVP_EncryptInit_ex(ctx.get(),
-                                    EVP_aes_256_cbc(),
-                                    nullptr,
-                                    params.key.data(),
-                                    params.iv.data()))
-        {
-            throw std::runtime_error("EncryptInit failed: " + GetOpenSSLError());
+      const EVP_CIPHER *cipher = EVP_aes_256_cbc();
+      int init_ok =
+          (mode == CipherMode::Encrypt)
+              ? EVP_EncryptInit_ex(ctx.get(), cipher, nullptr,
+                                   params.key.data(), params.iv.data())
+              : EVP_DecryptInit_ex(ctx.get(), cipher, nullptr,
+                                   params.key.data(), params.iv.data());
+
+      if (1 != init_ok)
+        throw std::runtime_error("CipherInit failed: " + GetOpenSSLError());
+
+      const size_t BUF_SZ = 4096;
+      std::vector<unsigned char> inBuf(BUF_SZ);
+      std::vector<unsigned char> outBuf(BUF_SZ + EVP_CIPHER_block_size(cipher));
+      int outLen = 0;
+
+      while (inStream.good()) {
+        inStream.read(reinterpret_cast<char *>(inBuf.data()), BUF_SZ);
+        if (inStream.bad()) {
+            throw std::runtime_error("I/O error while reading from input stream");
         }
+        std::streamsize read = inStream.gcount();
+        if (read > 0) {
+          int update_ok =
+              (mode == CipherMode::Encrypt)
+                  ? EVP_EncryptUpdate(ctx.get(), outBuf.data(), &outLen,
+                                      inBuf.data(), int(read))
+                  : EVP_DecryptUpdate(ctx.get(), outBuf.data(), &outLen,
+                                      inBuf.data(), int(read));
 
-        const size_t BUF_SZ = 4096;
-        std::vector<unsigned char> inBuf(BUF_SZ);
-        std::vector<unsigned char> outBuf(BUF_SZ + EVP_CIPHER_block_size(EVP_aes_256_cbc()));
-        int outLen = 0;
+          if (1 != update_ok)
+            throw std::runtime_error("CipherUpdate failed: " +
+                                     GetOpenSSLError());
 
-        while (inStream.good()) {
-            inStream.read(reinterpret_cast<char*>(inBuf.data()), BUF_SZ);
-            std::streamsize read = inStream.gcount();
-            if (read > 0) {
-                if (1 != EVP_EncryptUpdate(ctx.get(),
-                                           outBuf.data(), &outLen,
-                                           inBuf.data(), int(read)))
-                {
-                    throw std::runtime_error("EncryptUpdate failed: " + GetOpenSSLError());
-                }
-                outStream.write(reinterpret_cast<char*>(outBuf.data()), outLen);
-                if (!outStream.good())
-                    throw std::runtime_error("Write error during encryption");
-            }
+          outStream.write(reinterpret_cast<char *>(outBuf.data()), outLen);
+          if (!outStream.good())
+            throw std::runtime_error("Write error during processing");
         }
+      }
 
-        if (1 != EVP_EncryptFinal_ex(ctx.get(),
-                                     outBuf.data(), &outLen))
-        {
-            throw std::runtime_error("EncryptFinal failed: " + GetOpenSSLError());
-        }
-        outStream.write(reinterpret_cast<char*>(outBuf.data()), outLen);
-        if (!outStream.good())
-            throw std::runtime_error("Write error finalizing encryption");
-    }
+      int final_ok =
+          (mode == CipherMode::Encrypt)
+              ? EVP_EncryptFinal_ex(ctx.get(), outBuf.data(), &outLen)
+              : EVP_DecryptFinal_ex(ctx.get(), outBuf.data(), &outLen);
 
-    void DecryptFile(std::istream& inStream,
-                     std::ostream& outStream,
-                     std::string_view password)
-    {
-        if (!inStream.good())  throw std::runtime_error("Bad input stream");
-        if (!outStream.good()) throw std::runtime_error("Bad output stream");
+      if (1 != final_ok)
+        throw std::runtime_error("CipherFinal failed: " + GetOpenSSLError());
 
-        AesCipherParams params = CreateCipherParamsFromPassword(password);
-
-        std::unique_ptr<EVP_CIPHER_CTX, decltype(&EVP_CIPHER_CTX_free)>
-            ctx{EVP_CIPHER_CTX_new(), EVP_CIPHER_CTX_free};
-
-        if (!ctx) throw std::runtime_error("EVP_CIPHER_CTX_new failed");
-
-        if (1 != EVP_DecryptInit_ex(ctx.get(),
-                                    EVP_aes_256_cbc(),
-                                    nullptr,
-                                    params.key.data(),
-                                    params.iv.data()))
-        {
-            throw std::runtime_error("DecryptInit failed: " + GetOpenSSLError());
-        }
-
-        const size_t BUF_SZ = 4096;
-        std::vector<unsigned char> inBuf(BUF_SZ);
-        std::vector<unsigned char> outBuf(BUF_SZ + EVP_CIPHER_block_size(EVP_aes_256_cbc()));
-        int outLen = 0;
-
-        while (inStream.good()) {
-            inStream.read(reinterpret_cast<char*>(inBuf.data()), BUF_SZ);
-            std::streamsize read = inStream.gcount();
-            if (read > 0) {
-                if (1 != EVP_DecryptUpdate(ctx.get(),
-                                           outBuf.data(), &outLen,
-                                           inBuf.data(), int(read)))
-                {
-                    throw std::runtime_error("DecryptUpdate failed: " + GetOpenSSLError());
-                }
-                outStream.write(reinterpret_cast<char*>(outBuf.data()), outLen);
-                if (!outStream.good())
-                    throw std::runtime_error("Write error during decryption");
-            }
-        }
-
-        if (1 != EVP_DecryptFinal_ex(ctx.get(),
-                                     outBuf.data(), &outLen))
-        {
-            throw std::runtime_error("DecryptFinal failed: " + GetOpenSSLError());
-        }
-        outStream.write(reinterpret_cast<char*>(outBuf.data()), outLen);
-        if (!outStream.good())
-            throw std::runtime_error("Write error finalizing decryption");
+      outStream.write(reinterpret_cast<char *>(outBuf.data()), outLen);
+      if (!outStream.good())
+        throw std::runtime_error("Write error finalizing processing");
     }
 
     std::string CalculateChecksum(std::istream& inStream) {
@@ -181,6 +141,9 @@ class CryptoGuardCtx::Impl {
 
         while (inStream.good()) {
             inStream.read(reinterpret_cast<char*>(buf.data()), BUF_SZ);
+            if (inStream.bad()) {
+                throw std::runtime_error("I/O error while reading from input stream");
+            }
             std::streamsize read = inStream.gcount();
             if (read > 0) {
                 if (1 != EVP_DigestUpdate(mdctx.get(), buf.data(), size_t(read))) {
@@ -189,9 +152,9 @@ class CryptoGuardCtx::Impl {
             }
         }
 
-        unsigned char hash[EVP_MAX_MD_SIZE];
+        std::array<unsigned char,  EVP_MAX_MD_SIZE> hash{};
         unsigned int hashLen = 0;
-        if (1 != EVP_DigestFinal_ex(mdctx.get(), hash, &hashLen)) {
+        if (1 != EVP_DigestFinal_ex(mdctx.get(), hash.data(), &hashLen)) {
             throw std::runtime_error("DigestFinal failed: " + GetOpenSSLError());
         }
 
@@ -210,11 +173,11 @@ CryptoGuardCtx::CryptoGuardCtx()
 CryptoGuardCtx::~CryptoGuardCtx() = default;
 
 void CryptoGuardCtx::EncryptFile(std::istream &inStream, std::ostream &outStream, std::string_view password) {
-    pImpl_->EncryptFile(inStream, outStream, password);
+    pImpl_->ProcessFile(inStream, outStream, password, CipherMode::Encrypt);
 }
 
 void CryptoGuardCtx::DecryptFile(std::istream &inStream, std::ostream &outStream, std::string_view password) {
-    pImpl_->DecryptFile(inStream, outStream, password);
+    pImpl_->ProcessFile(inStream, outStream, password, CipherMode::Decrypt);
 }
 
 std::string CryptoGuardCtx::CalculateChecksum(std::istream &inStream) {

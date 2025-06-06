@@ -10,13 +10,14 @@
 namespace CryptoGuard {
 namespace po = boost::program_options;
 ProgramOptions::ProgramOptions() : desc_("Allowed options") {
-  desc_.add_options()("help,h", "Help screen")(
-      "command,c", po::value<std::string>()->required(),
-      "Command to execute encrypt,decrypt,checksum")(
-      "input,i", po::value<std::string>(&inputFile_)->required(), "Input file")(
-      "output,o", po::value<std::string>(&outputFile_),
-      "Output file")("password,p", po::value<std::string>(&password_),
-                     "Password for encode/decode");
+  // clang-format off
+  desc_.add_options()
+  ("help,h", "Help screen")
+  ("command,c", po::value<std::string>()->required(), "Command to execute encrypt,decrypt,checksum")
+  ("input,i", po::value<std::string>(&inputFile_)->required(), "Input file")
+  ("output,o", po::value<std::string>(&outputFile_), "Output file")
+  ("password,p", po::value<std::string>(&password_), "Password for encode/decode");
+  // clang-format on
 }
 
 ProgramOptions::~ProgramOptions() = default;
@@ -35,11 +36,9 @@ bool ProgramOptions::Parse(int argc, char *argv[]) {
   notify(vm);
 
   std::string cmd = vm["command"].as<std::string>();
-  auto lower_view = cmd | std::views::transform([](unsigned char c) {
-                      return static_cast<char>(std::tolower(c));
-                    });
-
-  cmd = std::string{lower_view.begin(), lower_view.end()};
+  cmd = cmd |
+        std::views::transform([](unsigned char c) { return std::tolower(c); }) |
+        std::ranges::to<std::string>();
 
   auto it = commandMapping_.find(cmd);
   if (it == commandMapping_.end()) {

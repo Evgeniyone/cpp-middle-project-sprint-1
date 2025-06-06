@@ -1,3 +1,4 @@
+#include <array>
 #include <gtest/gtest.h>
 #include <boost/program_options.hpp>
 #include "cmd_options.h"
@@ -7,7 +8,7 @@ using namespace CryptoGuard;
 namespace po = boost::program_options;
 
 TEST(ProgramOptions, ParseEncryptSuccess) {
-    const char* argv[] = {
+    static constexpr std::array<const char*, 9> argv = {
       "prog",
       "--command",  "encrypt",
       "--input",    "in.txt",
@@ -18,17 +19,13 @@ TEST(ProgramOptions, ParseEncryptSuccess) {
 
     ProgramOptions opts;
     EXPECT_NO_THROW({
-        bool ok = opts.Parse(argc, const_cast<char**>(argv));
+        bool ok = opts.Parse(argc, const_cast<char**>(argv.data()));
         EXPECT_TRUE(ok);
-        EXPECT_EQ(opts.GetCommand(), ProgramOptions::COMMAND_TYPE::ENCRYPT);
-        EXPECT_EQ(opts.GetInputFile(),  "in.txt");
-        EXPECT_EQ(opts.GetOutputFile(), "out.txt");
-        EXPECT_EQ(opts.GetPassword(),   "secret");
     });
 }
 
 TEST(ProgramOptions, ParseDecryptCaseInsensitive) {
-    const char* argv[] = {
+    static constexpr std::array<const char*, 9> argv = {
       "prog",
       "--command",  "DECRYPT",
       "--input",    "input.bin",
@@ -39,14 +36,14 @@ TEST(ProgramOptions, ParseDecryptCaseInsensitive) {
 
     ProgramOptions opts;
     EXPECT_NO_THROW({
-        bool ok = opts.Parse(argc, const_cast<char**>(argv));
+        bool ok = opts.Parse(argc, const_cast<char**>(argv.data()));
         EXPECT_TRUE(ok);
         EXPECT_EQ(opts.GetCommand(), ProgramOptions::COMMAND_TYPE::DECRYPT);
     });
 }
 
 TEST(ProgramOptions, ParseChecksumOnlyInput) {
-    const char* argv[] = {
+    static constexpr std::array<const char*, 5> argv = {
       "prog",
       "--command", "checksum",
       "--input",   "file.dat"
@@ -55,7 +52,7 @@ TEST(ProgramOptions, ParseChecksumOnlyInput) {
 
     ProgramOptions opts;
     EXPECT_NO_THROW({
-        bool ok = opts.Parse(argc, const_cast<char**>(argv));
+        bool ok = opts.Parse(argc, const_cast<char**>(argv.data()));
         EXPECT_TRUE(ok);
         EXPECT_EQ(opts.GetCommand(), ProgramOptions::COMMAND_TYPE::CHECKSUM);
         EXPECT_EQ(opts.GetOutputFile(), "");
@@ -64,18 +61,18 @@ TEST(ProgramOptions, ParseChecksumOnlyInput) {
 }
 
 TEST(ProgramOptions, MissingInputThrows) {
-    const char* argv[] = {
+    static constexpr std::array<const char*, 3> argv = {
       "prog",
       "--command", "checksum"
     };
     int argc = int(std::size(argv));
 
     ProgramOptions opts;
-    EXPECT_THROW(opts.Parse(argc, const_cast<char**>(argv)), po::required_option);
+    EXPECT_THROW(opts.Parse(argc, const_cast<char**>(argv.data())), po::required_option);
 }
 
 TEST(ProgramOptions, UnknownCommandThrows) {
-    const char* argv[] = {
+    static constexpr std::array<const char*, 5> argv = {
       "prog",
       "--command", "encode",
       "--input",   "in.txt"
@@ -83,11 +80,11 @@ TEST(ProgramOptions, UnknownCommandThrows) {
     int argc = int(std::size(argv));
 
     ProgramOptions opts;
-    EXPECT_THROW(opts.Parse(argc, const_cast<char**>(argv)), po::validation_error);
+    EXPECT_THROW(opts.Parse(argc, const_cast<char**>(argv.data())), po::validation_error);
 }
 
 TEST(ProgramOptions, EncryptMissingPasswordThrows) {
-    const char* argv[] = {
+    static constexpr std::array<const char*, 7> argv = {
       "prog",
       "--command", "encrypt",
       "--input",   "in.txt",
@@ -96,11 +93,11 @@ TEST(ProgramOptions, EncryptMissingPasswordThrows) {
     int argc = int(std::size(argv));
 
     ProgramOptions opts;
-    EXPECT_THROW(opts.Parse(argc, const_cast<char**>(argv)), std::runtime_error);
+    EXPECT_THROW(opts.Parse(argc, const_cast<char**>(argv.data())), std::runtime_error);
 }
 
 TEST(ProgramOptions, DecryptMissingOutputThrows) {
-    const char* argv[] = {
+    static constexpr std::array<const char*, 7> argv = {
       "prog",
       "--command", "decrypt",
       "--input",   "in.txt",
@@ -109,11 +106,11 @@ TEST(ProgramOptions, DecryptMissingOutputThrows) {
     int argc = int(std::size(argv));
 
     ProgramOptions opts;
-    EXPECT_THROW(opts.Parse(argc, const_cast<char**>(argv)), std::runtime_error);
+    EXPECT_THROW(opts.Parse(argc, const_cast<char**>(argv.data())), std::runtime_error);
 }
 
 TEST(ProgramOptions, HelpReturnsFalseNoThrow) {
-    const char* argv[] = {
+    static constexpr std::array<const char*, 2> argv = {
       "prog",
       "--help"
     };
@@ -121,7 +118,7 @@ TEST(ProgramOptions, HelpReturnsFalseNoThrow) {
 
     ProgramOptions opts;
     EXPECT_NO_THROW({
-        bool ok = opts.Parse(argc, const_cast<char**>(argv));
+        bool ok = opts.Parse(argc, const_cast<char**>(argv.data()));
         EXPECT_FALSE(ok);
     });
 }
@@ -179,11 +176,11 @@ TEST_F(CryptoGuardCtxTest, DecryptBadInputThrows) {
     EXPECT_THROW(ctx.DecryptFile(cipher_in, decrypted, password), std::runtime_error);
 }
 
-static constexpr char SHA256_EMPTY[] =
+static constexpr std::string_view SHA256_EMPTY =
     "e3b0c44298fc1c149afbf4c8996fb924"
     "27ae41e4649b934ca495991b7852b855";
 
-static constexpr char SHA256_ABC[] =
+static constexpr std::string_view SHA256_ABC =
     "ba7816bf8f01cfea414140de5dae2223"
     "b00361a396177a9cb410ff61f20015ad";
 

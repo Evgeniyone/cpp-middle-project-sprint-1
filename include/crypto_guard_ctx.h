@@ -5,6 +5,8 @@
 
 namespace CryptoGuard {
 
+enum class CipherMode { Encrypt, Decrypt };
+
 class CryptoGuardCtx {
 public:
     CryptoGuardCtx();
